@@ -124,7 +124,7 @@ if __name__ == '__main__':
     files = args.file
 
     if args.sorted:
-        files = list(sorted(args.files, key=basename))
+        files = list(sorted(files, key=basename))
 
     for file in files:
         print("Analyzing {} ... ".format(file), end='', flush=True)
