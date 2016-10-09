@@ -112,7 +112,11 @@ def do_concatenation(files, output):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Concatenate miniDV-sourced AVI scene files and export date/time info of the output to XLSX/TXT")
-    parser.add_argument("--sorted", action="store_true", help="Sort files by filename before concatenating")
+    parser.add_argument("--sort", choices=['name', 'time', 'none'], default='time',
+                        help="Sort files by given criterion. "
+                             "name: Sort by filename. "
+                             "time: Sort by recorded date/time (DEFAULT). "
+                             "none: Sort as given in argument list.")
     parser.add_argument("--xlsx", type=str, help="File to write XLSX information to")
     parser.add_argument("--txt", type=str, help="File to write plain text information to")
     parser.add_argument("outfile", type=str, help="Output AVI file to write")
@@ -123,21 +127,23 @@ if __name__ == '__main__':
 
     files = args.file
 
-    if args.sorted:
-        files = list(sorted(files, key=basename))
-
     for file in files:
         print("Analyzing {} ... ".format(file), end='', flush=True)
         file_info[file] = get_info(file)
         print("done")
 
+    if args.sort == "name":
+        files = list(sorted(files, key=basename))
+    elif args.sort == "time":
+        files = list(sorted(files, key=lambda f: file_info[f]["datetime"]))
+
     if args.xlsx:
-        print("Writing XLSX report {} ... ".format(args.xlsx))
+        print("Writing XLSX report {} ... ".format(args.xlsx), end='', flush=True)
         write_xlsx_report(args.xlsx, files, file_info)
         print("done")
 
     if args.txt:
-        print("Writing TXT report {} ... ".format(args.txt))
+        print("Writing TXT report {} ... ".format(args.txt), end='', flush=True)
         write_txt_report(args.txt, files, file_info)
         print("done")
 
