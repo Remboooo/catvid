@@ -19,19 +19,22 @@ Setting up:
 
 
 ```
-usage: concatdv.py [-h] [--sorted] [--xlsx XLSX] [--txt TXT]
-                    outfile file [file ...]
+usage: concatdv.py [-h] [--sort {name,time,none}] [--xlsx XLSX] [--txt TXT]
+                   outfile file [file ...]
 
 Concatenate miniDV-sourced AVI scene files and export date/time info of the
 output to XLSX/TXT
 
 positional arguments:
-  outfile      Output AVI file to write
-  file         AVI input files
+  outfile               Output AVI file to write
+  file                  AVI input files
 
 optional arguments:
-  -h, --help   show this help message and exit
-  --sorted     Sort files by filename before concatenating
-  --xlsx XLSX  File to write XLSX information to
-  --txt TXT    File to write plain text information to
+  -h, --help            show this help message and exit
+  --sort {name,time,none}
+                        Sort files by given criterion. name: Sort by filename.
+                        time: Sort by recorded date/time (DEFAULT). none: Sort
+                        as given in argument list.
+  --xlsx XLSX           File to write XLSX information to
+  --txt TXT             File to write plain text information to
 ```
