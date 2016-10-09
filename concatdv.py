@@ -65,7 +65,7 @@ def write_xlsx_report(xlsx, files, file_info):
         sheet = workbook.add_worksheet()
         int_fmt = workbook.add_format({'num_format': '0', 'align': 'left'})
         bold_fmt = workbook.add_format({'bold': True, 'align': 'left'})
-        datetime_fmt = workbook.add_format({'num_format': 'yyyy-dd-mm hh:mm:ss', 'align': 'left'})
+        datetime_fmt = workbook.add_format({'num_format': 'yyyy-mm-dd hh:mm:ss', 'align': 'left'})
 
         sheet.write(0, 0, 'Offset mm:ss.ms', bold_fmt)
 
