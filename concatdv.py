@@ -3,10 +3,14 @@ import datetime
 import re
 import subprocess
 from os.path import basename
+from os import path, makedirs
 import xlsxwriter
+from pathlib import Path
+from appdirs import *
+import pickle
+import errno
 
 duration_match = re.compile(r'\d\d:\d\d:\d\d.\d\d\d')
-
 
 def get_info(file):
     result = subprocess.run(["mediainfo", "--fullscan", file], stdout=subprocess.PIPE)
@@ -48,15 +52,17 @@ def write_txt_report(txt_file, files, file_info):
             txt.write("  Offset (mm:ss.ms)   : {}\n".format(ms_to_mm_ss_ms(offset_ms)))
             txt.write("  Offset (ms)         : {}\n".format(offset_ms))
             txt.write("  Offset (frames)     : {}\n".format(offset_frames))
-            txt.write("  Record date/time    : {}\n".format(info['datetime'].strftime('%Y-%m-%d %H:%M:%S')))
-            txt.write("  Duration (mm:ss.ms) : {}\n".format(ms_to_mm_ss_ms(info['milliseconds'])))
-            txt.write("  Duration (ms)       : {}\n".format(info['milliseconds']))
-            txt.write("  Duration (frames)   : {}\n".format(info['frames']))
+            txt.write("  Record date/time    : {}\n".format(info['datetime'].strftime('%Y-%m-%d %H:%M:%S') if 'datetime' in info else 'UNKNOWN'))
+            txt.write("  Duration (mm:ss.ms) : {}\n".format(ms_to_mm_ss_ms(info['milliseconds']) if 'milliseconds' in info else 'UNKNOWN'))
+            txt.write("  Duration (ms)       : {}\n".format(info['milliseconds'] if 'milliseconds' in info else 'UNKNOWN'))
+            txt.write("  Duration (frames)   : {}\n".format(info['frames'] if 'frames' in info else 'UNKNOWN'))
             txt.write("  Source filename     : {}\n".format(basename(file)))
             txt.write("\n")
 
-            offset_ms += info['milliseconds']
-            offset_frames += info['frames']
+            if 'milliseconds' in info:
+                offset_ms += info['milliseconds']
+            if 'frames' in info:
+                offset_frames += info['frames']
             scene += 1
 
 
@@ -93,14 +99,19 @@ def write_xlsx_report(xlsx, files, file_info):
             sheet.write(row, 0, ms_to_mm_ss_ms(offset_ms))
             sheet.write(row, 1, offset_ms, int_fmt)
             sheet.write(row, 2, offset_frames, int_fmt)
-            sheet.write_datetime(row, 3, info['datetime'], datetime_fmt)
-            sheet.write(row, 4, ms_to_mm_ss_ms(info['milliseconds']))
-            sheet.write(row, 5, info['milliseconds'], int_fmt)
-            sheet.write(row, 6, info['frames'], int_fmt)
+            if 'datetime' in info:
+                sheet.write_datetime(row, 3, info['datetime'], datetime_fmt)
+            if 'milliseconds' in info:
+                sheet.write(row, 4, ms_to_mm_ss_ms(info['milliseconds']))
+                sheet.write(row, 5, info['milliseconds'], int_fmt)
+            if 'frames' in info:
+                sheet.write(row, 6, info['frames'], int_fmt)
             sheet.write(row, 7, basename(file))
 
-            offset_ms += info['milliseconds']
-            offset_frames += info['frames']
+            if 'milliseconds' in info:
+                offset_ms += info['milliseconds']
+            if 'frames' in info:
+                offset_frames += info['frames']
 
             row += 1
 
@@ -109,6 +120,46 @@ def do_concatenation(files, output):
     files_arg = "concat:{}".format('|'.join(files))
     subprocess.run(["avconv", "-i", files_arg, "-c", "copy", output])
 
+
+def open_cache_file(mode):
+    cachedir = user_cache_dir('concatdv', 'bad-bit')
+    cachefile = path.join(cachedir, 'cache.p')
+    try:
+        makedirs(cachedir)
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            pass
+        else:
+            raise e
+    try:
+        return open(cachefile, mode)
+    except OSError as e:
+        raise e
+
+
+def load_cache():
+    print("Loading cache file (use --no-cache to disable) ... ", end='', flush=True)
+    try:
+        with open_cache_file('rb') as c:
+            cache = pickle.load(c)
+            print('done')
+            return cache
+    except FileNotFoundError:
+        print("does not exist, starting fresh")
+        return {}
+    except Exception as e:
+        print("failed: {}".format(e))
+        raise e
+
+
+def save_cache(cache):
+    print("Saving cache file (use --no-cache to disable) ... ", end='', flush=True)
+    try:
+        with open_cache_file('wb') as c:
+            pickle.dump(cache, c)
+            print('done')
+    except Exception as e:
+        print("failed: {}".format(e))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Concatenate miniDV-sourced AVI scene files and export date/time info of the output to XLSX/TXT")
@@ -119,23 +170,60 @@ if __name__ == '__main__':
                              "none: Sort as given in argument list.")
     parser.add_argument("--xlsx", type=str, help="File to write XLSX information to")
     parser.add_argument("--txt", type=str, help="File to write plain text information to")
-    parser.add_argument("outfile", type=str, help="Output AVI file to write")
+    parser.add_argument("--out", type=str, help="Output AVI file to write")
+    parser.add_argument("--no-cache", action="store_true", help="Don't use the metadata cache")
+    parser.add_argument("--no-periodic-cache-save", action="store_true", help="Stop saving the cache every 100 files (might help with extreme amounts of small files)")
+    parser.add_argument("--renew-cache", action="store_true", help="Start with an empty metadata cache")
     parser.add_argument("file", nargs="+", type=str, help="AVI input files")
     args = parser.parse_args()
 
+    if not args.no_cache and not args.renew_cache:
+        cache = load_cache()
+    else:
+        cache = {}
+
     file_info = {}
 
-    files = args.file
+    files = [str(Path(f).resolve()) for f in args.file]
+
+    meta_description = " and ".join(t for t in ['xlsx', 'txt'] if args.__dict__[t])
+    output_description = "perform NO "
+
+    print("concatdv will:")
+    print(" - Analyze {} files".format(len(files)))
+    print(" - Sort the files by {}".format(args.sort))
+    if meta_description:
+        print(" - Output metadata as {}".format(meta_description))
+    if args.out:
+        print(" - Concatenate everything and write output to '{}'".format(args.out))
+
+    file_info = cache["file_info"] if "file_info" in cache else {}
+
+    files_analyzed = 0
 
     for file in files:
         print("Analyzing {} ... ".format(file), end='', flush=True)
-        file_info[file] = get_info(file)
-        print("done")
+        if file in file_info:
+            print("cached")
+        else:
+            file_info[file] = get_info(file)
+            print("done")
+            files_analyzed += 1
+            if not args.no_cache and not args.no_periodic_cache_save and files_analyzed % 100 == 0:
+                print("Analyzed {} files, saving cache.".format(files_analyzed))
+                cache["file_info"] = file_info
+                save_cache(cache)
+
+
+    cache["file_info"] = file_info
+
+    if not args.no_cache:
+        save_cache(cache)
 
     if args.sort == "name":
         files = list(sorted(files, key=basename))
     elif args.sort == "time":
-        files = list(sorted(files, key=lambda f: file_info[f]["datetime"]))
+        files = list(sorted(files, key=lambda f: file_info[f]["datetime"] if "datetime" in file_info[f] else datetime.datetime.fromtimestamp(0)))
 
     if args.xlsx:
         print("Writing XLSX report {} ... ".format(args.xlsx), end='', flush=True)
@@ -147,6 +235,8 @@ if __name__ == '__main__':
         write_txt_report(args.txt, files, file_info)
         print("done")
 
-    print("Starting concatenation process")
-    do_concatenation(files, args.outfile)
+    if args.out:
+        print("Starting concatenation process ... ")
+        do_concatenation(files, args.out)
+    
     print("Done.")
