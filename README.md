@@ -20,13 +20,14 @@ Setting up:
 
 ```
 usage: concatdv.py [-h] [--sort {name,time,none}] [--xlsx XLSX] [--txt TXT]
-                   outfile file [file ...]
+                   [--out OUT] [--no-cache] [--no-periodic-cache-save]
+                   [--renew-cache]
+                   file [file ...]
 
 Concatenate miniDV-sourced AVI scene files and export date/time info of the
 output to XLSX/TXT
 
 positional arguments:
-  outfile               Output AVI file to write
   file                  AVI input files
 
 optional arguments:
@@ -37,4 +38,10 @@ optional arguments:
                         as given in argument list.
   --xlsx XLSX           File to write XLSX information to
   --txt TXT             File to write plain text information to
+  --out OUT             Output AVI file to write
+  --no-cache            Don't use the metadata cache
+  --no-periodic-cache-save
+                        Stop saving the cache every 100 files (might help with
+                        extreme amounts of small files)
+  --renew-cache         Start with an empty metadata cache
 ```

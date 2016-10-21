@@ -1,1 +1,2 @@
+appdirs==1.4.0
 xlsxwriter==0.9.3
