@@ -3,6 +3,8 @@ import datetime
 import glob
 import re
 import subprocess
+import platform
+from enum import Enum
 from os.path import basename
 from os import path, makedirs
 from shutil import which
@@ -18,38 +20,54 @@ mediainfo_exe = None
 ffmpeg_exe = None
 
 
+class ConcatStrategy(Enum):
+    CONCAT_PROTOCOL = 0
+    CONCAT_FILTER = 1
+
+
 class Preset:
-    def __init__(self, ffmpeg_params, description, use_concat_protocol):
+    def __init__(self, ffmpeg_params, complex_filters, description, concat_strategy):
         self.ffmpeg_params = ffmpeg_params
         self.description = description
-        self.use_concat_protocol = use_concat_protocol
+        self.concat_strategy = concat_strategy
+        self.complex_filters = complex_filters
 
     def build_ffmpeg_params(self, input_files):
         args = []
-        if self.use_concat_protocol:
+        if self.concat_strategy == ConcatStrategy.CONCAT_PROTOCOL:
             args += ["-i", "concat:{}".format('|'.join(input_files))]
-        else:
+        elif self.concat_strategy == ConcatStrategy.CONCAT_FILTER:
             args += [a for b in [["-i", f] for f in input_files] for a in b]
+            args += [
+                "-filter_complex",
+                f"concat=n={len(input_files)}:v=1:a=1[catv][outa];[catv]" + ",".join(self.complex_filters) + "[outv]",
+            ]
+            args += ["-map", "[outv]", "-map", "[outa]"]
+        args += self.ffmpeg_params
+        return args
 
 
 encode_presets = {
     "copy": Preset(
         ["-c", "copy"],
+        [],
         "Directly copy input to output. Only suited for MPEG-2 (includes DV) files with equal codec properties due to "
         "use of the concatenation protocol.",
-        True
+        ConcatStrategy.CONCAT_PROTOCOL
     ),
 
     "1080p": Preset(
-        ["-vf", "scale=-1:1080", "-c:v", "libx265", "-crf", "28", "-preset", "medium", "-c:a", "flac"],
+        ["-c:v", "libx265", "-crf", "28", "-preset", "medium", "-c:a", "flac"],
+        ["scale=-1:1080"],
         "Transcode to 1080p using libx265 with a CRF of 28 and FLAC audio. Suited for any input format.",
-        False
+        ConcatStrategy.CONCAT_FILTER
     ),
 
     "4k": Preset(
-        ["-vf", "scale=-1:2160", "-c:v", "libx265", "-crf", "28", "-preset", "medium", "-c:a", "flac"],
+        ["-c:v", "libx265", "-crf", "28", "-preset", "medium", "-c:a", "flac"],
+        ["scale=-1:2160"],
         "Transcode to 4k UHD using libx265 with a CRF of 28 and FLAC audio. Suited for any input format.",
-        False
+        ConcatStrategy.CONCAT_FILTER
     )
 }
 
@@ -179,9 +197,10 @@ def write_xlsx_report(xlsx, files, file_info):
             row += 1
 
 
-def do_concatenation(files, output, encode_args):
-    files_arg = "concat:{}".format('|'.join(files))
-    subprocess.run([ffmpeg_exe, "-i", files_arg] + encode_args + [output])
+def do_concatenation(files, output, preset: Preset):
+    args = [ffmpeg_exe] + preset.build_ffmpeg_params(files) + [output]
+    print(" ".join(args))
+    subprocess.run(args)
 
 
 def open_cache_file(mode):
@@ -254,7 +273,7 @@ def main():
             print(" - {}".format(preset_name))
             print("   {}".format(preset.description))
             print("   ffmpeg arguments: {}".format(" ".join(preset.ffmpeg_params)))
-            print("   concatenation method: {}".format("concat protocol" if preset.use_concat_protocol else "concat filter"))
+            print("   concatenation method: {}".format("concat protocol" if preset.concat_strategy else "concat filter"))
             print()
         sys.exit(0)
     if not args.no_cache and not args.renew_cache:
