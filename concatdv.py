@@ -1,9 +1,12 @@
 import argparse
 import datetime
+import glob
 import re
 import subprocess
 from os.path import basename
 from os import path, makedirs
+from shutil import which
+
 import xlsxwriter
 from pathlib import Path
 from appdirs import *
@@ -11,6 +14,63 @@ import pickle
 import errno
 
 duration_match = re.compile(r'\d\d:\d\d:\d\d.\d\d\d')
+mediainfo_exe = None
+ffmpeg_exe = None
+
+
+class Preset:
+    def __init__(self, ffmpeg_params, description, use_concat_protocol):
+        self.ffmpeg_params = ffmpeg_params
+        self.description = description
+        self.use_concat_protocol = use_concat_protocol
+
+    def build_ffmpeg_params(self, input_files):
+        args = []
+        if self.use_concat_protocol:
+            args += ["-i", "concat:{}".format('|'.join(input_files))]
+        else:
+            args += [a for b in [["-i", f] for f in input_files] for a in b]
+
+
+encode_presets = {
+    "copy": Preset(
+        ["-c", "copy"],
+        "Directly copy input to output. Only suited for MPEG-2 (includes DV) files with equal codec properties due to "
+        "use of the concatenation protocol.",
+        True
+    ),
+
+    "1080p": Preset(
+        ["-vf", "scale=-1:1080", "-c:v", "libx265", "-crf", "28", "-preset", "medium", "-c:a", "flac"],
+        "Transcode to 1080p using libx265 with a CRF of 28 and FLAC audio. Suited for any input format.",
+        False
+    ),
+
+    "4k": Preset(
+        ["-vf", "scale=-1:2160", "-c:v", "libx265", "-crf", "28", "-preset", "medium", "-c:a", "flac"],
+        "Transcode to 4k UHD using libx265 with a CRF of 28 and FLAC audio. Suited for any input format.",
+        False
+    )
+}
+
+
+def find_tools():
+    global mediainfo_exe, ffmpeg_exe
+    mediainfo_exe = which("mediainfo")
+    if mediainfo_exe is None:
+        print(
+            "mediainfo commandline tool not found. Use e.g. sudo apt install mediainfo (on Debian/Ubuntu) "
+            "or choco install mediainfo-cli (on Windows with Chocolatey) to install it."
+        )
+        sys.exit(-10)
+    ffmpeg_exe = which("ffmpeg") or which("avconv")
+    if ffmpeg_exe is None:
+        print(
+            "ffmpeg or avconv commandline tool not found. Use e.g. sudo apt install ffmpeg (on Debian/Ubuntu) "
+            "or choco install ffmpeg (on Windows with Chocolatey) to install it."
+        )
+        sys.exit(-10)
+
 
 def get_info(file):
     result = subprocess.run(["mediainfo", "--fullscan", file], stdout=subprocess.PIPE)
@@ -20,6 +80,9 @@ def get_info(file):
         if line.startswith("Recorded date"):
             if 'datetime' not in info:
                 info['datetime'] = datetime.datetime.strptime(line.split(": ", 1)[1], '%Y-%m-%d %H:%M:%S.000')
+        if line.startswith("Tagged date"):
+            if 'datetime' not in info:
+                info['datetime'] = datetime.datetime.strptime(line.split(": ", 1)[1], '%Z %Y-%m-%d %H:%M:%S')
         if line.startswith("Duration"):
             if 'milliseconds' not in info:
                 try:
@@ -116,9 +179,9 @@ def write_xlsx_report(xlsx, files, file_info):
             row += 1
 
 
-def do_concatenation(files, output):
+def do_concatenation(files, output, encode_args):
     files_arg = "concat:{}".format('|'.join(files))
-    subprocess.run(["avconv", "-i", files_arg, "-c", "copy", output])
+    subprocess.run([ffmpeg_exe, "-i", files_arg] + encode_args + [output])
 
 
 def open_cache_file(mode):
@@ -161,46 +224,60 @@ def save_cache(cache):
     except Exception as e:
         print("failed: {}".format(e))
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Concatenate miniDV-sourced AVI scene files and export date/time info of the output to XLSX/TXT")
+
+def main():
+    global file_info
+    find_tools()
+    parser = argparse.ArgumentParser(
+        description="Concatenate camera video scene files and export date/time info of the output to XLSX/TXT")
     parser.add_argument("--sort", choices=['name', 'time', 'none'], default='time',
                         help="Sort files by given criterion. "
                              "name: Sort by filename. "
                              "time: Sort by recorded date/time (DEFAULT). "
                              "none: Sort as given in argument list.")
-    parser.add_argument("--xlsx", type=str, help="File to write XLSX information to")
-    parser.add_argument("--txt", type=str, help="File to write plain text information to")
-    parser.add_argument("--out", type=str, help="Output AVI file to write")
+    parser.add_argument("--xlsx", "-x", type=str, help="File to write XLSX information to")
+    parser.add_argument("--txt", "-t", type=str, help="File to write plain text information to")
+    parser.add_argument("--out", "-o", type=str, help="Output filename to write to")
     parser.add_argument("--no-cache", action="store_true", help="Don't use the metadata cache")
-    parser.add_argument("--no-periodic-cache-save", action="store_true", help="Stop saving the cache every 100 files (might help with extreme amounts of small files)")
+    parser.add_argument("--no-periodic-cache-save", action="store_true",
+                        help="Stop saving the cache every 100 files (might help with extreme amounts of small files)")
     parser.add_argument("--renew-cache", action="store_true", help="Start with an empty metadata cache")
-    parser.add_argument("file", nargs="+", type=str, help="AVI input files")
+    parser.add_argument("--preset", "-p", type=str, nargs="?", default="copy", choices=encode_presets,
+                        help="Ffmpeg preset to use; use --list-presets to get a list")
+    parser.add_argument("--list-presets", "-l", action="store_true",
+                        help="List the ffmpeg presets available for encoding")
+    parser.add_argument("file", nargs="+", type=str, help="Input video files")
     args = parser.parse_args()
-
+    if args.list_presets:
+        print("Available presets:")
+        for preset_name, preset in encode_presets.items():
+            print(" - {}".format(preset_name))
+            print("   {}".format(preset.description))
+            print("   ffmpeg arguments: {}".format(" ".join(preset.ffmpeg_params)))
+            print("   concatenation method: {}".format("concat protocol" if preset.use_concat_protocol else "concat filter"))
+            print()
+        sys.exit(0)
     if not args.no_cache and not args.renew_cache:
         cache = load_cache()
     else:
         cache = {}
-
     file_info = {}
-
-    files = [str(Path(f).resolve()) for f in args.file]
-
+    files = args.file
+    if platform.system() == "Windows":
+        files = [f for p in args.file for f in glob.glob(p)]
+    files = [str(Path(f).resolve()) for f in files]
     meta_description = " and ".join(t for t in ['xlsx', 'txt'] if args.__dict__[t])
     output_description = "perform NO "
-
     print("concatdv will:")
     print(" - Analyze {} files".format(len(files)))
     print(" - Sort the files by {}".format(args.sort))
     if meta_description:
         print(" - Output metadata as {}".format(meta_description))
     if args.out:
-        print(" - Concatenate everything and write output to '{}'".format(args.out))
-
+        print(" - Concatenate and/or encode everything using preset '{}' and write output to '{}'".format(args.preset,
+                                                                                                          args.out))
     file_info = cache["file_info"] if "file_info" in cache else {}
-
     files_analyzed = 0
-
     for file in files:
         print("Analyzing {} ... ".format(file), end='', flush=True)
         if file in file_info:
@@ -213,30 +290,31 @@ if __name__ == '__main__':
                 print("Analyzed {} files, saving cache.".format(files_analyzed))
                 cache["file_info"] = file_info
                 save_cache(cache)
-
-
     cache["file_info"] = file_info
-
     if not args.no_cache:
         save_cache(cache)
-
     if args.sort == "name":
         files = list(sorted(files, key=basename))
     elif args.sort == "time":
-        files = list(sorted(files, key=lambda f: file_info[f]["datetime"] if "datetime" in file_info[f] else datetime.datetime.fromtimestamp(0)))
-
+        files = list(sorted(files, key=lambda f: file_info[f]["datetime"] if "datetime" in file_info[
+            f] else datetime.datetime.fromtimestamp(0)))
     if args.xlsx:
         print("Writing XLSX report {} ... ".format(args.xlsx), end='', flush=True)
         write_xlsx_report(args.xlsx, files, file_info)
         print("done")
-
     if args.txt:
         print("Writing TXT report {} ... ".format(args.txt), end='', flush=True)
         write_txt_report(args.txt, files, file_info)
         print("done")
-
     if args.out:
         print("Starting concatenation process ... ")
-        do_concatenation(files, args.out)
-    
+        do_concatenation(files, args.out, encode_presets[args.preset])
     print("Done.")
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("Aborted by user.")
+        sys.exit(-100)
