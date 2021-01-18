@@ -137,7 +137,7 @@ def write_txt_report(txt_file, files, file_info):
             txt.write("  Duration (mm:ss.ms) : {}\n".format(ms_to_mm_ss_ms(info['milliseconds']) if 'milliseconds' in info else 'UNKNOWN'))
             txt.write("  Duration (ms)       : {}\n".format(info['milliseconds'] if 'milliseconds' in info else 'UNKNOWN'))
             txt.write("  Duration (frames)   : {}\n".format(info['frames'] if 'frames' in info else 'UNKNOWN'))
-            txt.write("  Source filename     : {}\n".format(basename(file)))
+            txt.write("  Source filename     : {}\n".format(file))
             txt.write("\n")
 
             if 'milliseconds' in info:
@@ -187,7 +187,7 @@ def write_xlsx_report(xlsx, files, file_info):
                 sheet.write(row, 5, info['milliseconds'], int_fmt)
             if 'frames' in info:
                 sheet.write(row, 6, info['frames'], int_fmt)
-            sheet.write(row, 7, basename(file))
+            sheet.write(row, 7, file)
 
             if 'milliseconds' in info:
                 offset_ms += info['milliseconds']
@@ -244,18 +244,23 @@ def save_cache(cache):
         print("failed: {}".format(e))
 
 
+def replace_extension(path, new_ext):
+    return os.path.splitext(path)[0] + "." + new_ext
+
+
 def main():
-    global file_info
     find_tools()
     parser = argparse.ArgumentParser(
-        description="Concatenate camera video scene files and export date/time info of the output to XLSX/TXT")
+        description="Concatenate camera video scene files and export date/time info of the output to XLSX/TXT/JSON")
     parser.add_argument("--sort", choices=['name', 'time', 'none'], default='time',
                         help="Sort files by given criterion. "
                              "name: Sort by filename. "
                              "time: Sort by recorded date/time (DEFAULT). "
                              "none: Sort as given in argument list.")
-    parser.add_argument("--xlsx", "-x", type=str, help="File to write XLSX information to")
-    parser.add_argument("--txt", "-t", type=str, help="File to write plain text information to")
+    parser.add_argument("--xlsx", "-x", type=str, help="File to write XLSX metadata to. Default is next to --out.")
+    parser.add_argument("--no-xlsx", "-X", action='store_true', help="Disable XLSX metadata writing.")
+    parser.add_argument("--txt", "-t", type=str, help="File to write plain text metadata to. Default is next to --out.")
+    parser.add_argument("--no-txt", "-T", action='store_true', help="Disable plain text metadata writing.")
     parser.add_argument("--out", "-o", type=str, help="Output filename to write to")
     parser.add_argument("--no-cache", action="store_true", help="Don't use the metadata cache")
     parser.add_argument("--no-periodic-cache-save", action="store_true",
@@ -265,7 +270,7 @@ def main():
                         help="Ffmpeg preset to use; use --list-presets to get a list")
     parser.add_argument("--list-presets", "-l", action="store_true",
                         help="List the ffmpeg presets available for encoding")
-    parser.add_argument("file", nargs="+", type=str, help="Input video files")
+    parser.add_argument("file", nargs="*", type=str, help="Input video files")
     args = parser.parse_args()
     if args.list_presets:
         print("Available presets:")
@@ -317,13 +322,15 @@ def main():
     elif args.sort == "time":
         files = list(sorted(files, key=lambda f: file_info[f]["datetime"] if "datetime" in file_info[
             f] else datetime.datetime.fromtimestamp(0)))
-    if args.xlsx:
-        print("Writing XLSX report {} ... ".format(args.xlsx), end='', flush=True)
-        write_xlsx_report(args.xlsx, files, file_info)
+    if not args.no_xlsx:
+        xlsx = replace_extension(args.out, "xlsx") if not args.xlsx else args.xlsx
+        print("Writing XLSX report {} ... ".format(xlsx), end='', flush=True)
+        write_xlsx_report(xlsx, files, file_info)
         print("done")
-    if args.txt:
-        print("Writing TXT report {} ... ".format(args.txt), end='', flush=True)
-        write_txt_report(args.txt, files, file_info)
+    if not args.no_txt:
+        txt = replace_extension(args.out, "txt") if not args.txt else args.txt
+        print("Writing TXT report {} ... ".format(txt), end='', flush=True)
+        write_txt_report(txt, files, file_info)
         print("done")
     if args.out:
         print("Starting concatenation process ... ")
