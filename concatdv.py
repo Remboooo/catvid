@@ -323,15 +323,17 @@ def main():
         files = list(sorted(files, key=lambda f: file_info[f]["datetime"] if "datetime" in file_info[
             f] else datetime.datetime.fromtimestamp(0)))
     if not args.no_xlsx:
-        xlsx = replace_extension(args.out, "xlsx") if not args.xlsx else args.xlsx
-        print("Writing XLSX report {} ... ".format(xlsx), end='', flush=True)
-        write_xlsx_report(xlsx, files, file_info)
-        print("done")
+        xlsx = replace_extension(args.out, "xlsx") if args.out and not args.xlsx else args.xlsx
+        if xlsx:
+            print("Writing XLSX report {} ... ".format(xlsx), end='', flush=True)
+            write_xlsx_report(xlsx, files, file_info)
+            print("done")
     if not args.no_txt:
-        txt = replace_extension(args.out, "txt") if not args.txt else args.txt
-        print("Writing TXT report {} ... ".format(txt), end='', flush=True)
-        write_txt_report(txt, files, file_info)
-        print("done")
+        txt = replace_extension(args.out, "txt") if args.out and not args.txt else args.txt
+        if txt:
+            print("Writing TXT report {} ... ".format(txt), end='', flush=True)
+            write_txt_report(txt, files, file_info)
+            print("done")
     if args.out:
         print("Starting concatenation process ... ")
         do_concatenation(files, args.out, encode_presets[args.preset])
