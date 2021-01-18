@@ -282,6 +282,9 @@ def main():
             print("   concatenation method: {}".format("concat protocol" if preset.concat_strategy else "concat filter"))
             print()
         sys.exit(0)
+    elif not args.file:
+        parser.print_help()
+        sys.exit(0)
     if not args.no_cache and not args.renew_cache:
         cache = load_cache()
     else:
