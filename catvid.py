@@ -251,7 +251,8 @@ def replace_extension(path, new_ext):
 def main():
     find_tools()
     parser = argparse.ArgumentParser(
-        description="Concatenate camera video scene files and export date/time info of the output to XLSX/TXT/JSON")
+        description="Concatenate similar (e.g. camera scene) video files "
+                    "and export date/time info of the output to XLSX/TXT")
     parser.add_argument("--sort", choices=['name', 'time', 'none'], default='time',
                         help="Sort files by given criterion. "
                              "name: Sort by filename. "
@@ -267,7 +268,7 @@ def main():
                         help="Stop saving the cache every 100 files (might help with extreme amounts of small files)")
     parser.add_argument("--renew-cache", action="store_true", help="Start with an empty metadata cache")
     parser.add_argument("--preset", "-p", type=str, nargs="?", default="copy", choices=encode_presets,
-                        help="Ffmpeg preset to use; use --list-presets to get a list")
+                        help="Ffmpeg preset to use; use --list-presets to get a list. Default: copy")
     parser.add_argument("--list-presets", "-l", action="store_true",
                         help="List the ffmpeg presets available for encoding")
     parser.add_argument("file", nargs="*", type=str, help="Input video files")
