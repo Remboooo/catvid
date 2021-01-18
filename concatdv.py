@@ -304,10 +304,14 @@ def main():
     files_analyzed = 0
     for file in files:
         print("Analyzing {} ... ".format(file), end='', flush=True)
-        if file in file_info:
+        if file in file_info and file_info[file] is not None:
             print("cached")
         else:
-            file_info[file] = get_info(file)
+            info = get_info(file)
+            if info is None:
+                print("not found")
+                sys.exit(-10)
+            file_info[file] = info
             print("done")
             files_analyzed += 1
             if not args.no_cache and not args.no_periodic_cache_save and files_analyzed % 100 == 0:
