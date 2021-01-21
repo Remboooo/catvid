@@ -1,5 +1,6 @@
 import argparse
 import glob
+import json
 import logging
 import platform
 
@@ -13,8 +14,26 @@ from report import write_txt_report, write_xlsx_report
 log = logging.getLogger(__name__)
 
 
+class UserInputException(Exception):
+    pass
+
+
 def replace_extension(path, new_ext):
     return os.path.splitext(path)[0] + "." + new_ext
+
+
+def absolute_from_maybe_relative(path, relative_to_file):
+    if os.path.isabs(path):
+        return path
+    else:
+        return os.path.join(os.path.dirname(relative_to_file), path)
+
+
+def relative_to_or_absolute(path, relative_to_file):
+    try:
+        return os.path.relpath(path, os.path.dirname(relative_to_file))
+    except ValueError:
+        return os.path.abspath(path)
 
 
 def main():
@@ -31,18 +50,32 @@ def main():
                              "path: Sort by file path. "
                              "time: Sort by recorded date/time (DEFAULT). "
                              "none: Sort as given in argument list.")
+
     parser.add_argument("--xlsx", "-x", type=str, help="File to write XLSX metadata to. Default is next to --out.")
     parser.add_argument("--no-xlsx", "-X", action='store_true', help="Disable XLSX metadata writing.")
+
     parser.add_argument("--txt", "-t", type=str, help="File to write plain text metadata to. Default is next to --out.")
     parser.add_argument("--no-txt", "-T", action='store_true', help="Disable plain text metadata writing.")
-    parser.add_argument("--out", "-o", type=str, help="Output filename to write to")
+
+    parser.add_argument("--collection", "-c", type=str, metavar="CVC",
+                        help="File to write a collection specification to, such that a later run can use the "
+                             "same file ordering (but e.g. different encoding) using -i. "
+                             "Default is next to --out.")
+    parser.add_argument("--no-collection", "-C", action='store_true', help="Disable writing of a collection file.")
+    parser.add_argument("--in-collection", "-i", type=str, metavar="CVC",
+                        help="Collection file to use as input file list. "
+                             "Cannot be combined with command-line specified input files.")
+
+    parser.add_argument("--out", "-o", metavar="FILE", type=str, help="Output video filename to write to")
+
     parser.add_argument("--no-cache", action="store_true", help="Don't use the metadata cache")
     parser.add_argument("--no-periodic-cache-save", action="store_true",
                         help="Stop saving the cache every 100 files (might help with extreme amounts of small files)")
     parser.add_argument("--renew-cache", action="store_true", help="Start with an empty metadata cache")
+
     parser.add_argument("--preset", "-p", type=str, nargs="?", default="copy", choices=encode_presets,
                         help="Ffmpeg preset to use; use --list-presets to get a list. Default: copy")
-    parser.add_argument("--list-presets", "-l", action="store_true",
+    parser.add_argument("--list-presets", "-P", action="store_true",
                         help="List the ffmpeg presets available for encoding")
     parser.add_argument("file", nargs="*", type=str, help="Input video files")
     args = parser.parse_args()
@@ -65,9 +98,17 @@ def main():
     if not args.no_cache and not args.renew_cache:
         cache.load()
 
-    files = args.file
-    if platform.system() == "Windows":
-        files = [f for p in args.file for f in glob.glob(p)]
+    if args.file and args.in_collection:
+        raise UserInputException("Specifying both input collection file and separate input video files is not supported")
+    elif args.file:
+        files = args.file
+        if platform.system() == "Windows":
+            files = [f for p in args.file for f in glob.glob(p)]
+    elif args.in_collection:
+        with open(args.in_collection, 'r') as f:
+            files = [absolute_from_maybe_relative(p, args.in_collection) for p in json.load(f)["files"]]
+    else:
+        raise UserInputException("Must specify either input collection file, or separate video files")
 
     files = [str(Path(f).resolve()) for f in files]
 
@@ -112,6 +153,13 @@ def main():
             log.info("Writing TXT report %s", txt)
             write_txt_report(txt, file_list)
 
+    if not args.no_collection:
+        cvc = replace_extension(args.out, "cvc") if args.out and not args.collection else args.collection
+        if cvc:
+            log.info("Writing catvid collection %s", cvc)
+            with open(cvc, 'w') as f:
+                json.dump({"files": [relative_to_or_absolute(p, cvc) for p in files]}, f)
+
     if args.out:
         log.info("Starting concatenation")
         tools.do_concatenation(files, args.out, encode_presets[args.preset])
@@ -122,12 +170,10 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except MediaToolsNotInstalledException as e:
+    except (MediaToolsNotInstalledException, UserInputException, OSError) as e:
         log.error("%s", str(e))
         sys.exit(-1)
     except KeyboardInterrupt:
         print("Aborted by user.")
         sys.exit(-2)
-    except OSError as e:
-        log.error("%s", str(e))
 

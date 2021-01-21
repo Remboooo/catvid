@@ -13,7 +13,7 @@ def write_txt_report(txt_file, file_list):
         offset_ms = 0
         offset_frames = 0
 
-        for scene, file in enumerate(file_list.files, 1):
+        for scene, file in enumerate(file_list.paths, 1):
             info = file_list.meta[file]
 
             txt.write("Scene {:d}\n".format(scene))
@@ -58,7 +58,7 @@ def write_xlsx_report(xlsx, file_list):
         offset_ms = 0
         offset_frames = 0
 
-        for row, file in enumerate(file_list.files, 1):
+        for row, file in enumerate(file_list.paths, 1):
             info = file_list.meta[file]
 
             sheet.write(row, 0, ms_to_mm_ss_ms(offset_ms))

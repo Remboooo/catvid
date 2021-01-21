@@ -65,23 +65,29 @@ encode_presets = {
 
 class FileList:
     def __init__(self, mediatools: 'MediaTools', metacache: 'MetaCache'):
-        self.files = []
+        self.paths = []
         self.meta = {}
         self._mediatools = mediatools
         self._metacache = metacache
 
     def add_file(self, path):
         self.meta[path] = self._metacache.get(path, self._mediatools.get_meta)
-        self.files.append(path)
+        self.paths.append(path)
+
+    def get_meta(self, path):
+        return self.meta.get(path)
+
+    def get_paths(self):
+        return self.paths
 
     def sort_by_path(self):
-        self.files = sorted(self.files)
+        self.paths = sorted(self.paths)
 
     def sort_by_filename(self):
-        self.files = sorted(self.files, key=os.path.basename)
+        self.paths = sorted(self.paths, key=os.path.basename)
 
     def sort_by_datetime(self):
-        self.files = sorted(self.files, key=self._get_sort_datetime)
+        self.paths = sorted(self.paths, key=self._get_sort_datetime)
 
     def _get_sort_datetime(self, path):
         dt = self.meta[path].datetime
