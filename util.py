@@ -1,10 +1,18 @@
 import os
 
+overwrite_all = False
+
 
 def confirm_overwrite(path):
-    if os.path.exists(path):
-        answer = input(f"File '{path}' already exists. Overwrite (y/N)?")
-        if not answer.lower().startswith("y"):
+    global overwrite_all
+    if os.path.exists(path) and not overwrite_all:
+        answer = input(f"File '{path}' already exists. Overwrite (y(es)/a(ll)/N(o))? ").lower()
+        if answer.startswith("y"):
+            return True
+        elif answer.startswith("a"):
+            overwrite_all = True
+            return True
+        else:
             raise FileExistsError(f"File '{path}' already exists.")
     return True
 
