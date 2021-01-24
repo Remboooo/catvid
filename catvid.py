@@ -110,6 +110,36 @@ def main():
     if not args.no_cache and not args.renew_cache:
         cache.load()
 
+    xlsx = None
+    if not args.no_xlsx:
+        xlsx = replace_extension(args.out, "xlsx") if args.out and not args.xlsx else args.xlsx
+        if xlsx and not args.overwrite:
+            confirm_overwrite(xlsx)
+
+    txt = None
+    if not args.no_txt:
+        txt = replace_extension(args.out, "txt") if args.out and not args.txt else args.txt
+        if txt and not args.overwrite:
+            confirm_overwrite(txt)
+
+    cvc = None
+    if not args.no_collection:
+        cvc = replace_extension(args.out, "cvc") if args.out and not args.collection else args.collection
+        if cvc and not args.overwrite:
+            confirm_overwrite(cvc)
+
+    out_path = None
+    logfile = None
+    if args.out:
+        out_path = os.path.abspath(args.out)
+        if not args.overwrite:
+            confirm_overwrite(out_path)
+
+        if not args.no_log:
+            logfile = replace_extension(out_path, "log") if not args.log else args.log
+            if not args.overwrite:
+                confirm_overwrite(logfile)
+
     if args.file and args.in_collection:
         raise UserInputException("Specifying both input collection file and separate input video files is not supported")
     elif args.file:
@@ -153,35 +183,22 @@ def main():
     elif args.sort == "time":
         file_list.sort_by_datetime()
 
-    if not args.no_xlsx:
-        xlsx = replace_extension(args.out, "xlsx") if args.out and not args.xlsx else args.xlsx
-        if xlsx and (args.overwrite or confirm_overwrite(xlsx)):
-            log.info("Writing XLSX report %s", xlsx)
-            write_xlsx_report(xlsx, file_list)
+    if xlsx:
+        log.info("Writing XLSX report %s", xlsx)
+        write_xlsx_report(xlsx, file_list)
 
-    if not args.no_txt:
-        txt = replace_extension(args.out, "txt") if args.out and not args.txt else args.txt
-        if txt and (args.overwrite or confirm_overwrite(txt)):
-            log.info("Writing TXT report %s", txt)
-            write_txt_report(txt, file_list)
+    if txt:
+        log.info("Writing TXT report %s", txt)
+        write_txt_report(txt, file_list)
 
-    if not args.no_collection:
-        cvc = replace_extension(args.out, "cvc") if args.out and not args.collection else args.collection
-        if cvc and (args.overwrite or confirm_overwrite(cvc)):
-            log.info("Writing catvid collection %s", cvc)
-            with open(cvc, 'w') as f:
-                json.dump({"files": [relative_to_or_absolute(p, cvc) for p in files]}, f)
+    if cvc:
+        log.info("Writing catvid collection %s", cvc)
+        with open(cvc, 'w') as f:
+            json.dump({"files": [relative_to_or_absolute(p, cvc) for p in files]}, f)
 
-    if args.out:
-        out_path = os.path.abspath(args.out)
-        if args.overwrite or confirm_overwrite(out_path):
-            logfile = None
-            if not args.no_log:
-                logfile = replace_extension(args.out, "log") if not args.log else args.log
-                if not args.overwrite:
-                    confirm_overwrite(logfile)
-            log.info("Starting concatenation")
-            tools.do_concatenation(files, out_path, encode_presets[args.preset], logfile)
+    if out_path:
+        log.info("Starting concatenation")
+        tools.do_concatenation(files, out_path, encode_presets[args.preset], logfile)
 
     log.info("Done.")
 
