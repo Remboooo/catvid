@@ -163,7 +163,11 @@ class MediaTools:
         with open_if_exists(logfile_path, "wb") as f:
             logfile_handle = f if f else subprocess.DEVNULL
 
+            log.info("Starting video processing. This can take a while...")
+
             args = [self.ffmpeg_exe] + preset.build_ffmpeg_params(files) + ["-y", output]
-            log.info("Executing: %s", " ".join("'" + a + "'" for a in args))
+            log.debug("Executing: %s", " ".join("'" + a + "'" for a in args))
 
             subprocess.run(args, stdout=logfile_handle, stderr=logfile_handle, stdin=subprocess.DEVNULL)
+
+            log.info("Processing done.")
