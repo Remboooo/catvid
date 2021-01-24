@@ -33,6 +33,29 @@ def write_txt_report(txt_file, file_list):
                 offset_frames += info.frames
 
 
+def write_srt(path, file_list, time_fmt='%Y-%m-%d %H:%M:%S', duration=5):
+    def srt_duration(ms):
+        hours = ms // 3600_000
+        minutes = (ms // 60_000) % 60
+        seconds = (ms // 1000) % 60
+        millis = ms % 1000
+        return "{:02d}:{:02d}:{:02d},{:03d}".format(hours, minutes, seconds, millis)
+
+    with open(path, 'w') as srt:
+        offset_ms = 0
+
+        for scene, file in enumerate(file_list.paths, 1):
+            info = file_list.meta[file]
+
+            srt.write(f"{scene:d}\r\n")
+            srt.write(f"{srt_duration(offset_ms)} --> {srt_duration(offset_ms + 1000*duration)}\r\n")
+            srt.write(f"{info.datetime.strftime(time_fmt)}\r\n")
+            srt.write("\r\n")
+
+            if info.milliseconds:
+                offset_ms += info.milliseconds
+
+
 def write_xlsx_report(xlsx, file_list):
     with xlsxwriter.Workbook(xlsx) as workbook:
         sheet = workbook.add_worksheet()

@@ -9,7 +9,7 @@ from appdirs import *
 
 from metacache import MetaCache
 from mediatools import encode_presets, MediaTools, MediaToolsNotInstalledException, FileList
-from report import write_txt_report, write_xlsx_report
+from report import write_txt_report, write_xlsx_report, write_srt
 from util import confirm_overwrite
 
 log = logging.getLogger(__name__)
@@ -71,7 +71,12 @@ def main():
     parser.add_argument("--log", "-l", metavar="LOGFILE", type=str,
                         help="Logfile to write ffmpeg output to when creating output video file. "
                              "Default is next to --out.")
-    parser.add_argument("--no-log", "-L", action="store_true", help="Output log file to write to")
+    parser.add_argument("--no-log", "-L", action="store_true", help="Disable writing of log file.")
+
+    parser.add_argument("--srt", "-s", metavar="SUBSFILE", type=str,
+                        help="File to write SRT 'subtitles' to, which just briefly flashes the recording date at the "
+                             "start of each new video file. Default is next to --out.")
+    parser.add_argument("--no-srt", "-S", action="store_true", help="Disable writing of SRT subtitles files.")
 
     parser.add_argument("--out", "-o", metavar="FILE", type=str, help="Output video filename to write to")
 
@@ -110,23 +115,10 @@ def main():
     if not args.no_cache and not args.renew_cache:
         cache.load()
 
-    xlsx = None
-    if not args.no_xlsx:
-        xlsx = replace_extension(args.out, "xlsx") if args.out and not args.xlsx else args.xlsx
-        if xlsx and not args.overwrite:
-            confirm_overwrite(xlsx)
-
-    txt = None
-    if not args.no_txt:
-        txt = replace_extension(args.out, "txt") if args.out and not args.txt else args.txt
-        if txt and not args.overwrite:
-            confirm_overwrite(txt)
-
-    cvc = None
-    if not args.no_collection:
-        cvc = replace_extension(args.out, "cvc") if args.out and not args.collection else args.collection
-        if cvc and not args.overwrite:
-            confirm_overwrite(cvc)
+    xlsx = get_meta_out_file(args.xlsx, args.no_xlsx, args.overwrite, args.out, "xlsx")
+    txt = get_meta_out_file(args.txt, args.no_txt, args.overwrite, args.out, "txt")
+    cvc = get_meta_out_file(args.collection, args.no_collection, args.overwrite, args.out, "cvc")
+    srt = get_meta_out_file(args.srt, args.no_srt, args.overwrite, args.out, "srt")
 
     out_path = None
     logfile = None
@@ -135,10 +127,7 @@ def main():
         if not args.overwrite:
             confirm_overwrite(out_path)
 
-        if not args.no_log:
-            logfile = replace_extension(out_path, "log") if not args.log else args.log
-            if not args.overwrite:
-                confirm_overwrite(logfile)
+        logfile = get_meta_out_file(args.log, args.no_log, args.overwrite, args.out, "log")
 
     if args.file and args.in_collection:
         raise UserInputException("Specifying both input collection file and separate input video files is not supported")
@@ -183,6 +172,11 @@ def main():
     elif args.sort == "time":
         file_list.sort_by_datetime()
 
+    if cvc:
+        log.info("Writing catvid collection %s", cvc)
+        with open(cvc, 'w') as f:
+            json.dump({"files": [relative_to_or_absolute(p, cvc) for p in files]}, f)
+
     if xlsx:
         log.info("Writing XLSX report %s", xlsx)
         write_xlsx_report(xlsx, file_list)
@@ -191,16 +185,24 @@ def main():
         log.info("Writing TXT report %s", txt)
         write_txt_report(txt, file_list)
 
-    if cvc:
-        log.info("Writing catvid collection %s", cvc)
-        with open(cvc, 'w') as f:
-            json.dump({"files": [relative_to_or_absolute(p, cvc) for p in files]}, f)
+    if srt:
+        log.info("Writing SRT subtitles %s", srt)
+        write_srt(srt, file_list)
 
     if out_path:
         log.info("Starting concatenation")
         tools.do_concatenation(files, out_path, encode_presets[args.preset], logfile)
 
     log.info("Done.")
+
+
+def get_meta_out_file(arg, disable_arg, overwrite_arg, out_path, ext):
+    path = None
+    if not disable_arg:
+        path = replace_extension(out_path, ext) if out_path and not arg else arg
+        if path and not overwrite_arg:
+            confirm_overwrite(path)
+    return path
 
 
 if __name__ == '__main__':
