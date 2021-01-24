@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 from enum import Enum
 from shutil import which
 
@@ -168,6 +169,31 @@ class MediaTools:
             args = [self.ffmpeg_exe] + preset.build_ffmpeg_params(files) + ["-y", output]
             log.debug("Executing: %s", " ".join("'" + a + "'" for a in args))
 
-            subprocess.run(args, stdout=logfile_handle, stderr=logfile_handle, stdin=subprocess.DEVNULL)
+            proc = subprocess.Popen(args, stdout=logfile_handle, stderr=logfile_handle, stdin=subprocess.DEVNULL)
 
-            log.info("Processing done.")
+            if logfile_path:
+                with open(logfile_path, "r") as logfile_in:
+                    test = None
+                    prev_line = ""
+                    while proc.poll() is None:
+                        line = test
+                        test = logfile_in.readline()
+                        if not test:
+                            if line:
+                                if line.startswith("frame="):
+                                    line_shortness = (len(prev_line) - len(line))
+                                    padding = ((" " * line_shortness) if line_shortness > 0 else "")
+                                    print(line.strip() + padding, end="\r", flush=True)
+                                    prev_line = line
+                            time.sleep(.5)
+
+                    print()
+                    if proc.returncode != 0:
+                        log.error("Encoding failed. Check the log file for the error.")
+            else:
+                proc.wait()
+                if proc.returncode != 0:
+                    log.error("Encoding failed. Re-run with logging to find out what went wrong.")
+
+            if proc.returncode == 0:
+                log.info("Processing done.")
