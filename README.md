@@ -43,39 +43,45 @@ make your own judgement on how to get the relevant packages).
 ### 3. Read the help
 Once the requirements are in place, you can use `./catvid --help` (Linux) or `catvid --help` (Windows) in this folder
 
-You may want to add the catvid folder to your PATH to be able to use the tool from anywhere (and without the `./` on Linux).
+You may want to add the `catvid` folder to your PATH to be able to use the tool from anywhere 
+(and without the `./` on Linux).
 
 Examples
 --------
-### Concatenate multiple MPEG-2 AVI files
+### Concatenate multiple equally encoded MPEG-2 AVI files without transcoding
 This is the original use for this tool; concatenating AVI files originating from miniDV tapes into one big one
 while writing out a .txt and .xlsx file describing the source scenes, their date/time info and where to find them in 
-the resulting video.
+the resulting video. This uses the 'copydv' preset which determines how to tell FMPEG to concatenate video files. List
+all of them using the commandline parameter '-P'.
 
-`catvid 1.avi 2.avi -o out.avi`
+`catvid -p copydv 1.avi 2.avi -o out.avi`
 
-Takes in multiple MPEG-2 AVI files and writes them into one big `out.avi`, and writing a description of what files
-ended up where in the output to `out.txt` and `out.xlsx`.
+Takes in multiple MPEG-2 AVI files and writes them into one big `out.avi`, and writes a description of what files
+ended up where in the output to `out.txt`, `out.xlsx` and `out.cvc` which is a 'collection file' that allows later
+re-processing of the same inputs using different presets or different output formats.
 
-**NOTE:** this *only* works for MPEG-2 AVI input files with equal recording parameters, such as scene files extracted 
-from a miniDV tape. It will *not* work for MP4 or MKV or anything that can't be concatenated using the `ffmpeg` 
-`concat` input protocol.
+**NOTE:** This method keeps the metadata such as recording time, but only works for MPEG-2 AVI files.
 
 ### Concatenate multiple MP4 files
-This extends the tool for use with modern cameras. It simultaneously concatenates the input files and re-encodes them
-to a target format. It uses a encoding 'preset'. You can list all of them using `-l`. 
-The default preset is 'copy' which can only be used for MPEG-2 recordings (see previous example). 
-For MP4 recordings, we need to use a different one. Currently we can choose between `4k` and `1080p`, both of which
-use libx265 to encode with a default quality rate factor of 28 and a FLAC encoded audio stream.
+This extends the tool for use with modern cameras. It concatenates the input files using the 'concat' FFMPEG demuxer
+and copies the streams to the target format without re-encoding. 
+
+`catvid c0001.mp4 c0002.mp4 -o out.mkv`
+
+**NOTE:** This only works for extremely similar video files, i.e. different scenes from one specific camera shot at the
+same quality settings.
+
+### Transcode multiple MP4 files
+
+This extends the tool for use with multiple scenes shot at different settings. 
+It simultaneously concatenates the input files and re-encodes them to a target format.
+It can also be used to e.g. re-encode a video file to 1080p directly from multiple source files.
+Currently we can choose between the presets `4k` and `1080p`, both of which use libx265 to encode with a default 
+quality rate factor of 28 and a FLAC encoded audio stream.
 
 `catvid -p 1080p c0001.mp4 c0002.mp4 -o out.mkv`
 
 **NOTE:** the output file format must be MKV because other containers don't currently support a FLAC audio stream.
 
-
 ### Further notes
-Suggestions are very welcome on how to achieve direct copying of the input audio/video streams into one output file
-for non-MPEG-2 files, so more similar to how the `copy` preset works for MPEG-2 files. This should be many orders of
-magnitudes faster and prevents quality loss for the `4k` preset.
-
 Many more options are available than described in the examples; use `catvid --help` to see them all.

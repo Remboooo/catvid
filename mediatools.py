@@ -1,12 +1,15 @@
+import atexit
 import datetime
 import logging
 import os
 import subprocess
+import tempfile
 from enum import Enum
 from shutil import which
 
 from meta import FileMeta
 from metacache import MetaCache
+from util import open_if_exists
 
 log = logging.getLogger(__name__)
 
@@ -14,6 +17,7 @@ log = logging.getLogger(__name__)
 class ConcatStrategy(Enum):
     CONCAT_PROTOCOL = 0
     CONCAT_FILTER = 1
+    CONCAT_DEMUX = 2
 
 
 class Preset:
@@ -34,12 +38,30 @@ class Preset:
                 f"concat=n={len(input_files)}:v=1:a=1[catv][outa];[catv]" + ",".join(self.complex_filters) + "[outv]",
             ]
             args += ["-map", "[outv]", "-map", "[outa]"]
+        elif self.concat_strategy == ConcatStrategy.CONCAT_DEMUX:
+            tfh, tempfile_path = tempfile.mkstemp(text=True)
+            atexit.register(lambda: os.unlink(tempfile_path))
+            with os.fdopen(tfh, 'w') as tf:
+                for input_file in input_files:
+                    path = input_file.replace('\\', '/')
+                    print(f"file 'file:{path}'", file=tf)
+
+            args += ['-f', 'concat', '-safe', '0', '-i', tempfile_path]
+
         args += self.ffmpeg_params
         return args
 
 
 encode_presets = {
     "copy": Preset(
+        ["-c", "copy"],
+        [],
+        "Directly copy input to output. Uses the FFMPEG concat demuxer to concatenate without re-encoding. "
+        "Only suited for concatenating files with the exact same codecs and parameters (e.g. scenes from a camera).",
+        ConcatStrategy.CONCAT_DEMUX
+    ),
+
+    "copydv": Preset(
         ["-c", "copy"],
         [],
         "Directly copy input to output. Only suited for MPEG-2 (includes DV) files with equal codec properties due to "
@@ -137,7 +159,11 @@ class MediaTools:
 
         return info
 
-    def do_concatenation(self, files, output, preset: Preset):
-        args = [self.ffmpeg_exe] + preset.build_ffmpeg_params(files) + [output]
-        log.info("Executing: %s", " ".join("'" + a + "'" for a in args))
-        subprocess.run(args)
+    def do_concatenation(self, files, output, preset: Preset, logfile_path):
+        with open_if_exists(logfile_path, "wb") as f:
+            logfile_handle = f if f else subprocess.DEVNULL
+
+            args = [self.ffmpeg_exe] + preset.build_ffmpeg_params(files) + ["-y", output]
+            log.info("Executing: %s", " ".join("'" + a + "'" for a in args))
+
+            subprocess.run(args, stdout=logfile_handle, stderr=logfile_handle, stdin=subprocess.DEVNULL)

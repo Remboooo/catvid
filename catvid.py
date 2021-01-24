@@ -10,6 +10,7 @@ from appdirs import *
 from metacache import MetaCache
 from mediatools import encode_presets, MediaTools, MediaToolsNotInstalledException, FileList
 from report import write_txt_report, write_xlsx_report
+from util import confirm_overwrite
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Concatenate similar (e.g. camera scene) video files "
                     "and export date/time info of the output to XLSX/TXT")
+
     parser.add_argument("--verbose", "-v", action="store_true", help="Activate verbose mode (debug logging)")
     parser.add_argument("--sort", choices=['name', 'time', 'path', 'none'], default='time',
                         help="Sort files by given criterion. "
@@ -66,6 +68,11 @@ def main():
                         help="Collection file to use as input file list. "
                              "Cannot be combined with command-line specified input files.")
 
+    parser.add_argument("--log", "-l", metavar="LOGFILE", type=str,
+                        help="Logfile to write ffmpeg output to when creating output video file. "
+                             "Default is next to --out.")
+    parser.add_argument("--no-log", "-L", action="store_true", help="Output log file to write to")
+
     parser.add_argument("--out", "-o", metavar="FILE", type=str, help="Output video filename to write to")
 
     parser.add_argument("--no-cache", action="store_true", help="Don't use the metadata cache")
@@ -77,10 +84,14 @@ def main():
                         help="Ffmpeg preset to use; use --list-presets to get a list. Default: copy")
     parser.add_argument("--list-presets", "-P", action="store_true",
                         help="List the ffmpeg presets available for encoding")
+
+    parser.add_argument("--overwrite", "-y", action="store_true", help="Don't ask before overwriting existing files.")
+
     parser.add_argument("file", nargs="*", type=str, help="Input video files")
+
     args = parser.parse_args()
 
-    logging.basicConfig(format="%(message)s", level=logging.DEBUG if args.verbose else logging.INFO)
+    logging.basicConfig(format="%(message)s", level=logging.DEBUG if args.verbose else logging.INFO, stream=sys.stdout)
 
     if args.list_presets:
         print("Available presets:")
@@ -91,7 +102,8 @@ def main():
             print("   concatenation method: {}".format("concat protocol" if preset.concat_strategy else "concat filter"))
             print()
         sys.exit(0)
-    elif not args.file:
+    elif not args.file and not args.in_collection:
+        print("Must specify at least one input file or collection (--in-collection)")
         parser.print_help()
         sys.exit(0)
 
@@ -143,26 +155,33 @@ def main():
 
     if not args.no_xlsx:
         xlsx = replace_extension(args.out, "xlsx") if args.out and not args.xlsx else args.xlsx
-        if xlsx:
+        if xlsx and (args.overwrite or confirm_overwrite(xlsx)):
             log.info("Writing XLSX report %s", xlsx)
             write_xlsx_report(xlsx, file_list)
 
     if not args.no_txt:
         txt = replace_extension(args.out, "txt") if args.out and not args.txt else args.txt
-        if txt:
+        if txt and (args.overwrite or confirm_overwrite(txt)):
             log.info("Writing TXT report %s", txt)
             write_txt_report(txt, file_list)
 
     if not args.no_collection:
         cvc = replace_extension(args.out, "cvc") if args.out and not args.collection else args.collection
-        if cvc:
+        if cvc and (args.overwrite or confirm_overwrite(cvc)):
             log.info("Writing catvid collection %s", cvc)
             with open(cvc, 'w') as f:
                 json.dump({"files": [relative_to_or_absolute(p, cvc) for p in files]}, f)
 
     if args.out:
-        log.info("Starting concatenation")
-        tools.do_concatenation(files, args.out, encode_presets[args.preset])
+        out_path = os.path.abspath(args.out)
+        if args.overwrite or confirm_overwrite(out_path):
+            logfile = None
+            if not args.no_log:
+                logfile = replace_extension(args.out, "log") if not args.log else args.log
+                if not args.overwrite:
+                    confirm_overwrite(logfile)
+            log.info("Starting concatenation")
+            tools.do_concatenation(files, out_path, encode_presets[args.preset], logfile)
 
     log.info("Done.")
 
@@ -170,7 +189,7 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (MediaToolsNotInstalledException, UserInputException, OSError) as e:
+    except (MediaToolsNotInstalledException, UserInputException, FileExistsError, OSError) as e:
         log.error("%s", str(e))
         sys.exit(-1)
     except KeyboardInterrupt:
