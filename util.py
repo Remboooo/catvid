@@ -27,3 +27,10 @@ def open_if_exists(file, mode='r'):
 
             def __exit__(self, exc_type, exc_val, exc_tb):
                 pass
+
+
+def ms_to_mm_ss_ms(ms):
+    minutes = ms // 60000
+    seconds = (ms // 1000) % 60
+    millis = ms % 1000
+    return "{:02d}:{:02d}.{:03d}".format(minutes, seconds, millis)

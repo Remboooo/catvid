@@ -191,7 +191,7 @@ def main():
 
     if out_path:
         log.info("Starting concatenation")
-        tools.do_concatenation(files, out_path, encode_presets[args.preset], logfile)
+        tools.do_concatenation(file_list, out_path, encode_presets[args.preset], logfile)
 
     log.info("Done.")
 

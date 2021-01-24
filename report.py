@@ -1,11 +1,6 @@
 import xlsxwriter
 
-
-def ms_to_mm_ss_ms(ms):
-    minutes = ms // 60000
-    seconds = (ms // 1000) % 60
-    millis = ms % 1000
-    return "{:02d}:{:02d}.{:03d}".format(minutes, seconds, millis)
+from util import ms_to_mm_ss_ms
 
 
 def write_txt_report(txt_file, file_list):

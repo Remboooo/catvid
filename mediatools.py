@@ -10,7 +10,7 @@ from shutil import which
 
 from meta import FileMeta
 from metacache import MetaCache
-from util import open_if_exists
+from util import open_if_exists, ms_to_mm_ss_ms
 
 log = logging.getLogger(__name__)
 
@@ -28,22 +28,23 @@ class Preset:
         self.concat_strategy = concat_strategy
         self.complex_filters = complex_filters
 
-    def build_ffmpeg_params(self, input_files):
+    def build_ffmpeg_params(self, file_list: 'FileList'):
+        paths = file_list.paths
         args = []
         if self.concat_strategy == ConcatStrategy.CONCAT_PROTOCOL:
-            args += ["-i", "concat:{}".format('|'.join(input_files))]
+            args += ["-i", "concat:{}".format('|'.join(paths))]
         elif self.concat_strategy == ConcatStrategy.CONCAT_FILTER:
-            args += [a for b in [["-i", f] for f in input_files] for a in b]
+            args += [a for b in [["-i", f] for f in paths] for a in b]
             args += [
                 "-filter_complex",
-                f"concat=n={len(input_files)}:v=1:a=1[catv][outa];[catv]" + ",".join(self.complex_filters) + "[outv]",
+                f"concat=n={len(paths)}:v=1:a=1[catv][outa];[catv]" + ",".join(self.complex_filters) + "[outv]",
             ]
             args += ["-map", "[outv]", "-map", "[outa]"]
         elif self.concat_strategy == ConcatStrategy.CONCAT_DEMUX:
             tfh, tempfile_path = tempfile.mkstemp(text=True)
             atexit.register(lambda: os.unlink(tempfile_path))
             with os.fdopen(tfh, 'w') as tf:
-                for input_file in input_files:
+                for input_file in paths:
                     path = input_file.replace('\\', '/')
                     print(f"file 'file:{path}'", file=tf)
 
@@ -70,17 +71,59 @@ encode_presets = {
         ConcatStrategy.CONCAT_PROTOCOL
     ),
 
-    "1080p": Preset(
-        ["-c:v", "libx265", "-crf", "28", "-preset", "medium", "-c:a", "flac"],
+    "nvenc1080p": Preset(
+        [
+            "-c:v", "nvenc_h264", "-rc:v", "vbr_hq", "-cq:v", "28",
+                "-b:v", "2500k", "-maxrate:v", "5000k", "-profile:v", "high", "-level:v", "4.1",
+            "-c:a", "aac", "-b:a", "128k"
+            #"-c:a", "flac", "-strict", "-2"
+         ],
         ["scale=-1:1080"],
-        "Transcode to 1080p using libx265 with a CRF of 28 and FLAC audio. Suited for any input format.",
+        "Transcode to 1080p HD using NVENC h264 with a CRF of 28, bit rate 2.5-5Mbps and AAC audio. "
+        "Not by any means perfect video quality, mainly meant for streaming. "
+        "Suited for any input format. "
+        "NOTE: ONLY available with NVidia cards and ffmpeg build with support for NVENC. ",
+        ConcatStrategy.CONCAT_FILTER
+    ),
+
+    "1080p": Preset(
+        [
+            "-c:v", "libx264", "-crf", "28", "-preset", "medium",
+                "-b:v", "2500k", "-maxrate:v", "5000k", "-profile:v", "high", "-level:v", "4.1",
+            "-c:a", "flac", "-strict", "-2"
+        ],
+        ["scale=-1:1080"],
+        "Transcode to 1080p using libx264 with a CRF of 28, bit rate 2.5-5Mbps and AAC audio. "
+        "Not by any means perfect video quality, mainly meant for streaming. "
+        "Suited for any input format.",
+        ConcatStrategy.CONCAT_FILTER
+    ),
+
+    "nvenc4k": Preset(
+        [
+            "-c:v", "nvenc_h264", "-rc:v", "vbr_hq", "-cq:v", "28",
+                "-b:v", "7500k", "-maxrate:v", "15000k", "-profile:v", "high", "-level:v", "4.1",
+            "-c:a", "aac", "-b:a", "128k"
+            # "-c:a", "flac", "-strict", "-2"
+        ],
+        ["scale=-1:2160"],
+        "Transcode to 4k UHD using NVENC h264 with a CRF of 28, bit rate 7.5-15Mbps and AAC audio. "
+        "Not by any means perfect video quality, mainly meant for streaming. "
+        "Suited for any input format. "
+        "NOTE: ONLY available with NVidia cards and ffmpeg build with support for NVENC. ",
         ConcatStrategy.CONCAT_FILTER
     ),
 
     "4k": Preset(
-        ["-c:v", "libx265", "-crf", "28", "-preset", "medium", "-c:a", "flac"],
+        [
+            "-c:v", "libx264", "-crf", "28", "-preset", "medium",
+                "-b:v", "7500k", "-maxrate:v", "15000k", "-profile:v", "high", "-level:v", "4.1",
+            "-c:a", "flac", "-strict", "-2"
+        ],
         ["scale=-1:2160"],
-        "Transcode to 4k UHD using libx265 with a CRF of 28 and FLAC audio. Suited for any input format.",
+        "Transcode to 4k UHD using NVENC h264 with a CRF of 28, bit rate 7.5-15Mbps and AAC audio. "
+        "Not by any means perfect video quality, mainly meant for streaming. "
+        "Suited for any input format. ",
         ConcatStrategy.CONCAT_FILTER
     )
 }
@@ -96,6 +139,13 @@ class FileList:
     def add_file(self, path):
         self.meta[path] = self._metacache.get(path, self._mediatools.get_meta)
         self.paths.append(path)
+
+    def get_total_duration_ms(self):
+        duration_mss = [self.meta[p].milliseconds for p in self.paths]
+        if any(d is None for d in duration_mss):
+            return None
+        else:
+            return sum(duration_mss)
 
     def get_meta(self, path):
         return self.meta.get(path)
@@ -160,13 +210,18 @@ class MediaTools:
 
         return info
 
-    def do_concatenation(self, files, output, preset: Preset, logfile_path):
+    def do_concatenation(self, file_list, output, preset: Preset, logfile_path):
         with open_if_exists(logfile_path, "wb") as f:
             logfile_handle = f if f else subprocess.DEVNULL
 
-            log.info("Starting video processing. This can take a while...")
+            runtime = file_list.get_total_duration_ms()
 
-            args = [self.ffmpeg_exe] + preset.build_ffmpeg_params(files) + ["-y", output]
+            log.info(
+                "Starting video processing. Total duration of resulting file is %s. This can take a while...",
+                str(datetime.timedelta(milliseconds=runtime)) if runtime else "unknown"
+            )
+
+            args = [self.ffmpeg_exe] + preset.build_ffmpeg_params(file_list) + ["-y", output]
             log.debug("Executing: %s", " ".join("'" + a + "'" for a in args))
 
             proc = subprocess.Popen(args, stdout=logfile_handle, stderr=logfile_handle, stdin=subprocess.DEVNULL)
