@@ -42,10 +42,11 @@ def write_srt(path, file_list, time_fmt='%Y-%m-%d %H:%M:%S', duration=5):
         for scene, file in enumerate(file_list.paths, 1):
             info = file_list.meta[file]
 
-            srt.write(f"{scene:d}\r\n")
-            srt.write(f"{srt_duration(offset_ms)} --> {srt_duration(offset_ms + 1000*duration)}\r\n")
-            srt.write(f"{info.datetime.strftime(time_fmt)}\r\n")
-            srt.write("\r\n")
+            if info.datetime:
+                srt.write(f"{scene:d}\r\n")
+                srt.write(f"{srt_duration(offset_ms)} --> {srt_duration(offset_ms + 1000*duration)}\r\n")
+                srt.write(f"{info.datetime.strftime(time_fmt)}\r\n")
+                srt.write("\r\n")
 
             if info.milliseconds:
                 offset_ms += info.milliseconds
