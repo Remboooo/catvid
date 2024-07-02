@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import time
 from enum import Enum
-from shutil import which
+from shutil import which, rmtree
 
 from meta import FileMeta
 from metacache import MetaCache
@@ -19,28 +19,41 @@ class ConcatStrategy(Enum):
     CONCAT_PROTOCOL = 0
     CONCAT_FILTER = 1
     CONCAT_DEMUX = 2
+    CONCAT_PROTOCOL_VIA_REMUX = 3
+
 
 
 class Preset:
-    def __init__(self, ffmpeg_params, complex_filters, description, concat_strategy):
-        self.ffmpeg_params = ffmpeg_params
+    def __init__(self, decode_params, video_params, audio_params, complex_filters, description, concat_strategy):
+        self.decode_params = decode_params
+        self.video_params = video_params
+        self.audio_params = audio_params
         self.description = description
         self.concat_strategy = concat_strategy
         self.complex_filters = complex_filters
 
-    def build_ffmpeg_params(self, file_list: 'FileList'):
+    def get_commandlines(self, ffmpeg_exe: str, file_list: 'FileList', out_file: str):
         paths = file_list.paths
-        args = []
         if self.concat_strategy == ConcatStrategy.CONCAT_PROTOCOL:
-            args += ["-i", "concat:{}".format('|'.join(paths))]
+            args = [ffmpeg_exe]
+            args += self.decode_params + ["-i", "concat:{}".format('|'.join(paths))]
+            args += self.video_params
+            args += self.audio_params
+            return None, [args]
         elif self.concat_strategy == ConcatStrategy.CONCAT_FILTER:
-            args += [a for b in [["-i", f] for f in paths] for a in b]
+            args = [ffmpeg_exe]
+            args += self.decode_params + [a for b in [["-i", f] for f in paths] for a in b]
             args += [
                 "-filter_complex",
                 f"concat=n={len(paths)}:v=1:a=1[catv][outa];[catv]" + ",".join(self.complex_filters) + "[outv]",
             ]
             args += ["-map", "[outv]", "-map", "[outa]"]
+            args += self.video_params
+            args += self.audio_params
+            args += [out_file]
+            return None, [args]
         elif self.concat_strategy == ConcatStrategy.CONCAT_DEMUX:
+            args = [ffmpeg_exe]
             tfh, tempfile_path = tempfile.mkstemp(text=True)
             atexit.register(lambda: os.unlink(tempfile_path))
             with os.fdopen(tfh, 'w') as tf:
@@ -48,15 +61,35 @@ class Preset:
                     path = input_file.replace('\\', '/')
                     print(f"file 'file:{path}'", file=tf)
 
-            args += ['-f', 'concat', '-safe', '0', '-i', tempfile_path]
+            args += self.decode_params + ['-f', 'concat', '-safe', '0', '-i', tempfile_path]
+            args += self.video_params
+            args += self.audio_params
+            args += [out_file]
+            return None, [args]
+        elif self.concat_strategy == ConcatStrategy.CONCAT_PROTOCOL_VIA_REMUX:
+            tempdir = tempfile.mkdtemp()
+            atexit.register(lambda: rmtree(tempdir))
 
-        args += self.ffmpeg_params
-        return args
+            ts_paths = [os.path.join(tempdir, str(i) + ".ts") for i in range(len(paths))]
+            for ts_path in ts_paths:
+                os.mkfifo(ts_path, 0o600)
+
+            remux_args = [
+                    [ffmpeg_exe] + self.decode_params + ["-y", "-i", in_path, "-c:v", "copy", "-bsf:v", "h264_mp4toannexb", *self.audio_params, "-f", "mpegts", ts_path]
+                    for in_path, ts_path in zip(paths, ts_paths)
+            ]
+            
+
+            args = [ffmpeg_exe, "-y", "-f", "mpegts"] + self.decode_params + ["-i", "concat:{}".format('|'.join(ts_paths)), "-bsf:a", "aac_adtstoasc", *self.video_params, "-c:a", "copy", out_file]
+            return None, remux_args + [args]
+
 
 
 encode_presets = {
     "copy": Preset(
+        [],
         ["-c", "copy"],
+        [],
         [],
         "Directly copy input to output. Uses the FFMPEG concat demuxer to concatenate without re-encoding. "
         "Only suited for concatenating files with the exact same codecs and parameters (e.g. scenes from a camera).",
@@ -64,7 +97,9 @@ encode_presets = {
     ),
 
     "copydv": Preset(
+        [],
         ["-c", "copy"],
+        [],
         [],
         "Directly copy input to output. Only suited for MPEG-2 (includes DV) files with equal codec properties due to "
         "use of the concatenation protocol.",
@@ -72,56 +107,64 @@ encode_presets = {
     ),
 
     "nvenc1080p": Preset(
+        ["-hwaccel", "cuda", "-hwaccel_output_format", "auto"],
         [
-            "-c:v", "nvenc_h264", "-rc:v", "vbr_hq", "-cq:v", "28",
-                "-b:v", "2500k", "-maxrate:v", "5000k", "-profile:v", "high", "-level:v", "4.1",
+            "-c:v", "h264_nvenc", 
+            "-preset:v", "p7", "-tune:v", "hq", "-rc:v", "vbr", "-cq:v", "28", "-level:v", "5.2", "-b:v", "8000k", "-maxrate:v", "12000k", "-multipass", "qres",
+        ],
+        [
             "-c:a", "aac", "-b:a", "128k"
-            #"-c:a", "flac", "-strict", "-2"
-         ],
-        ["scale=-1:1080"],
-        "Transcode to 1080p HD using NVENC h264 with a CRF of 28, bit rate 2.5-5Mbps and AAC audio. "
-        "Not by any means perfect video quality, mainly meant for streaming. "
+        ],
+        ["scale_npp=-1:1080"],
+        "Transcode to 1080p HD using NVENC h264 with a CQ of 19, bit rate 8-12Mbps and AAC audio. "
         "Suited for any input format. "
         "NOTE: ONLY available with NVidia cards and ffmpeg build with support for NVENC. ",
-        ConcatStrategy.CONCAT_FILTER
+        ConcatStrategy.CONCAT_PROTOCOL_VIA_REMUX
     ),
 
     "1080p": Preset(
+        [],
         [
             "-c:v", "libx264", "-crf", "28", "-preset", "medium",
-                "-b:v", "2500k", "-maxrate:v", "5000k", "-profile:v", "high", "-level:v", "4.1",
-            "-c:a", "flac", "-strict", "-2"
+            "-b:v", "8000k", "-maxrate:v", "12000k", "-profile:v", "high", "-level:v", "5.2",
+        ], 
+        [
+            "-c:a", "aac", "-b:a", "128k"
         ],
         ["scale=-1:1080"],
-        "Transcode to 1080p using libx264 with a CRF of 28, bit rate 2.5-5Mbps and AAC audio. "
-        "Not by any means perfect video quality, mainly meant for streaming. "
+        "Transcode to 1080p using libx264 with a CRF of 28, bit rate 8-12Mbps and AAC audio. "
         "Suited for any input format.",
         ConcatStrategy.CONCAT_FILTER
     ),
 
     "nvenc4k": Preset(
+        ["-hwaccel", "cuda", "-hwaccel_output_format", "auto"],
         [
-            "-c:v", "nvenc_h264", "-rc:v", "vbr_hq", "-cq:v", "28",
-                "-b:v", "7500k", "-maxrate:v", "15000k", "-profile:v", "high", "-level:v", "4.1",
-            "-c:a", "aac", "-b:a", "128k"
-            # "-c:a", "flac", "-strict", "-2"
+            "-c:v", "hevc_nvenc", "-preset:v", "p7", "-tune:v", "hq", 
+            "-rc:v", "vbr", "-cq:v", "28", "-level:v", "5.2", "-b:v", "22500k", "-maxrate:v", "35000k", 
+            "-multipass", "qres",
         ],
-        ["scale=-1:2160"],
-        "Transcode to 4k UHD using NVENC h264 with a CRF of 28, bit rate 7.5-15Mbps and AAC audio. "
-        "Not by any means perfect video quality, mainly meant for streaming. "
+        [
+            "-c:a", "aac", "-b:a", "128k"
+        ],
+        ["scale_npp=-1:2160"],
+        "Transcode to 4k UHD using NVENC HEVC with a CRF of 28, bit rate 22.5-35Mbps and AAC audio. "
         "Suited for any input format. "
         "NOTE: ONLY available with NVidia cards and ffmpeg build with support for NVENC. ",
-        ConcatStrategy.CONCAT_FILTER
+        ConcatStrategy.CONCAT_PROTOCOL_VIA_REMUX
     ),
 
     "4k": Preset(
+        [],
         [
-            "-c:v", "libx264", "-crf", "28", "-preset", "medium",
-                "-b:v", "7500k", "-maxrate:v", "15000k", "-profile:v", "high", "-level:v", "4.1",
-            "-c:a", "flac", "-strict", "-2"
+            "-c:v", "libx265", "-crf", "28", "-preset", "medium",
+                "-b:v", "22500k", "-maxrate:v", "35000k", "-profile:v", "high", "-level:v", "5.2",
+        ],
+        [
+            "-c:a", "aac", "-b:a", "128k"
         ],
         ["scale=-1:2160"],
-        "Transcode to 4k UHD using NVENC h264 with a CRF of 28, bit rate 7.5-15Mbps and AAC audio. "
+        "Transcode to 4k UHD using NVENC h264 with a CRF of 28, bit rate 40-80Mbps and AAC audio. "
         "Not by any means perfect video quality, mainly meant for streaming. "
         "Suited for any input format. ",
         ConcatStrategy.CONCAT_FILTER
@@ -221,34 +264,45 @@ class MediaTools:
                 str(datetime.timedelta(milliseconds=runtime)) if runtime else "unknown"
             )
 
-            args = [self.ffmpeg_exe] + preset.build_ffmpeg_params(file_list) + ["-y", output]
-            log.debug("Executing: %s", " ".join("'" + a + "'" for a in args))
+            serial_commandlines, parallel_commandlines = preset.get_commandlines(self.ffmpeg_exe, file_list, output)
+            #args = [self.ffmpeg_exe] + preset.build_ffmpeg_params(file_list) + ["-y", output]
 
-            proc = subprocess.Popen(args, stdout=logfile_handle, stderr=logfile_handle, stdin=subprocess.DEVNULL)
+            serial_commandlines = serial_commandlines or []
+            serial_queue = list(serial_commandlines)
+            serial_proc = None
+            procs = []
 
-            if logfile_path:
-                with open(logfile_path, "r") as logfile_in:
-                    test = None
-                    prev_line = ""
-                    while proc.poll() is None:
-                        line = test
-                        test = logfile_in.readline()
-                        if not test:
-                            if line:
-                                if line.startswith("frame="):
-                                    line_shortness = (len(prev_line) - len(line))
-                                    padding = ((" " * line_shortness) if line_shortness > 0 else "")
-                                    print(line.strip() + padding, end="\r", flush=True)
-                                    prev_line = line
-                            time.sleep(.5)
+            for args in parallel_commandlines:
+                log.debug("Executing: %s", " ".join("'" + a + "'" for a in args))
+                procs.append(subprocess.Popen(args, stdout=logfile_handle, stderr=logfile_handle, stdin=subprocess.DEVNULL))
 
-                    print()
-                    if proc.returncode != 0:
-                        log.error("Encoding failed. Check the log file for the error.")
-            else:
-                proc.wait()
-                if proc.returncode != 0:
+            try:
+                fail = False
+                while procs:
+                    for proc in list(procs):
+                        result = proc.poll()
+                        if result is not None:
+                            log.debug("Process finished: %s", " ".join("'" + a + "'" for a in proc.args))
+                            procs.remove(proc)
+                            if result != 0:
+                                fail = True
+                                break
+                    if serial_queue and (serial_proc is None or serial_proc not in procs):
+                        args = serial_queue.pop(0)
+                        log.debug("Executing: %s", " ".join("'" + a + "'" for a in args))
+                        serial_proc = subprocess.Popen(args, stdout=logfile_handle, stderr=logfile_handle, stdin=subprocess.DEVNULL)
+                        procs.append(serial_proc)
+                    time.sleep(.5)
+            except KeyboardInterrupt as e:
+                for proc in procs:
+                    proc.kill()
+                raise e
+
+            if fail:
+                if logfile_path:
+                    log.error("Encoding failed. Check the log file for the error.")
+                else:
                     log.error("Encoding failed. Re-run with logging to find out what went wrong.")
 
-            if proc.returncode == 0:
+            if not fail:
                 log.info("Processing done.")
