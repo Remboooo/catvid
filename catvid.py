@@ -103,8 +103,7 @@ def main():
         for preset_name, preset in encode_presets.items():
             print(" - {}".format(preset_name))
             print("   {}".format(preset.description))
-            print("   ffmpeg arguments: {}".format(" ".join(preset.ffmpeg_params)))
-            print("   concatenation method: {}".format("concat protocol" if preset.concat_strategy else "concat filter"))
+            print("   concatenation method: {}".format(preset.concat_strategy.name))
             print()
         sys.exit(0)
     elif not args.file and not args.in_collection:
