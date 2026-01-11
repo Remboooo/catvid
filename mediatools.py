@@ -116,9 +116,9 @@ encode_presets = {
             "-c:a", "aac", "-b:a", "128k"
         ],
         ["scale_npp=-1:1080"],
-        "Transcode to 1080p HD using NVENC h264 with a CQ of 19, bit rate 8-12Mbps and AAC audio. "
+        "Transcode to 1080p HD using NDEC/NVENC h264 with a CRF of 28, bit rate 8-12Mbps and 128kbps AAC audio. "
         "Suited for any input format. "
-        "NOTE: ONLY available with NVidia cards and ffmpeg build with support for NVENC. ",
+        "NOTE: ONLY available with NVidia cards and ffmpeg build with support for NVDEC/NVENC/CUDA scaling. ",
         ConcatStrategy.CONCAT_PROTOCOL_VIA_REMUX
     ),
 
@@ -132,7 +132,7 @@ encode_presets = {
             "-c:a", "aac", "-b:a", "128k"
         ],
         ["scale=-1:1080"],
-        "Transcode to 1080p using libx264 with a CRF of 28, bit rate 8-12Mbps and AAC audio. "
+        "Transcode to 1080p using libx264 with a CRF of 28, bit rate 8-12Mbps and 128kbps AAC audio. "
         "Suited for any input format.",
         ConcatStrategy.CONCAT_FILTER
     ),
@@ -148,9 +148,9 @@ encode_presets = {
             "-c:a", "aac", "-b:a", "128k"
         ],
         ["scale_npp=-1:2160"],
-        "Transcode to 4k UHD using NVENC HEVC with a CRF of 28, bit rate 22.5-35Mbps and AAC audio. "
+        "Transcode to 4k UHD using NVDEC/NVENC HEVC with a CRF of 28, bit rate 22.5-35Mbps and 128kbps AAC audio. "
         "Suited for any input format. "
-        "NOTE: ONLY available with NVidia cards and ffmpeg build with support for NVENC. ",
+        "NOTE: ONLY available with NVidia cards and ffmpeg build with support for NVDEC/NVENC/CUDA scaling. ",
         ConcatStrategy.CONCAT_PROTOCOL_VIA_REMUX
     ),
 
@@ -164,7 +164,7 @@ encode_presets = {
             "-c:a", "aac", "-b:a", "128k"
         ],
         ["scale=-1:2160"],
-        "Transcode to 4k UHD using NVENC h264 with a CRF of 28, bit rate 40-80Mbps and AAC audio. "
+        "Transcode to 4k UHD HEVC with a CRF of 28, bit rate 22.5-35Mbps and 128kbps AAC audio. "
         "Not by any means perfect video quality, mainly meant for streaming. "
         "Suited for any input format. ",
         ConcatStrategy.CONCAT_FILTER
@@ -242,7 +242,7 @@ class MediaTools:
             if line.startswith("Recorded date") and not info.datetime:
                 info.datetime = datetime.datetime.strptime(line.split(": ", 1)[1], '%Y-%m-%d %H:%M:%S.000')
             if line.startswith("Tagged date") and not info.datetime:
-                info.datetime = datetime.datetime.strptime(line.split(": ", 1)[1], '%Z %Y-%m-%d %H:%M:%S')
+                info.datetime = datetime.datetime.strptime(line.split(": ", 1)[1], '%Y-%m-%d %H:%M:%S %Z')
             if line.startswith("Duration") and not info.milliseconds:
                 try:
                     info.milliseconds = int(line.split(": ", 1)[1])
